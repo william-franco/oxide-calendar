@@ -1,0 +1,292 @@
+import { ScrollView } from "std-widgets.slint";
+import { OxideTheme, OxideType, OxideSpacing, OxideShape, OxideAccents } from "@oxide/oxide.slint";
+import { MonthCellData, DayColumnData, AgendaData } from "types.slint";
+
+// Month grid: 6 rows x 7 columns, positioned by index so it always fills the area.
+export component MonthView inherits Rectangle {
+    in property <[MonthCellData]> cells;
+    callback open-day(string);
+
+    background: transparent;
+
+    VerticalLayout {
+        spacing: OxideSpacing.xxs;
+
+        HorizontalLayout {
+            for name in ["Dom", "Seg", "Ter", "Qua", "Qui", "Sex", "Sáb"]: Text {
+                horizontal-stretch: 1;
+                text: name;
+                horizontal-alignment: center;
+                font-size: OxideType.label-medium.size;
+                font-weight: OxideType.label-medium.weight;
+                color: OxideTheme.colors.on-surface-variant;
+            }
+        }
+
+        grid := Rectangle {
+            vertical-stretch: 1;
+            clip: true;
+
+            for cell[index] in root.cells: Rectangle {
+                x: mod(index, 7) * grid.width / 7;
+                y: floor(index / 7) * grid.height / 6;
+                width: grid.width / 7;
+                height: grid.height / 6;
+                background: cell.today ? OxideTheme.colors.primary-container.with-alpha(0.35) : transparent;
+                border-width: 0.5px;
+                border-color: OxideTheme.colors.outline-variant;
+
+                // Declared first so the item rectangles below sit on top of it.
+                TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.open-day(cell.key);
+                    }
+                }
+
+                VerticalLayout {
+                    padding: OxideSpacing.xxs;
+                    spacing: 2px;
+
+                    Text {
+                        text: cell.label;
+                        font-size: OxideType.label-large.size;
+                        font-weight: cell.today ? 700 : 500;
+                        font-family: OxideType.family;
+                        color: cell.today ? OxideTheme.colors.primary
+                            : cell.in-month ? OxideTheme.colors.on-surface
+                            : OxideTheme.colors.on-surface-variant.with-alpha(0.5);
+                        horizontal-alignment: center;
+                    }
+
+                    for item[j] in cell.items: Rectangle {
+                        height: 18px;
+                        border-radius: OxideShape.extra-small;
+                        background: OxideAccents.container(cell.accents[j]);
+
+                        Text {
+                            x: OxideSpacing.xs;
+                            width: parent.width - 2 * OxideSpacing.xs;
+                            height: parent.height;
+                            text: item;
+                            font-size: OxideType.label-small.size;
+                            font-family: OxideType.family;
+                            color: OxideAccents.on-container(cell.accents[j]);
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+                    }
+
+                    if cell.more > 0: Text {
+                        text: "+\{cell.more} mais";
+                        font-size: OxideType.label-small.size;
+                        color: OxideTheme.colors.on-surface-variant;
+                    }
+                }
+            }
+        }
+    }
+}
+
+// Hour grid used by the week (3, 5 or 7 days) and day views.
+export component TimeGrid inherits Rectangle {
+    in property <[DayColumnData]> days;
+    /// Current time as minutes from midnight, or negative when not shown.
+    in property <float> now-minutes: -1;
+    callback open-event(int, string);
+    callback slot-clicked(string, int);
+
+    property <length> hour-height: 48px;
+    property <length> gutter: 52px;
+
+    background: transparent;
+
+    ScrollView {
+        VerticalLayout {
+            spacing: 0px;
+
+            HorizontalLayout {
+                Rectangle {
+                    width: root.gutter;
+                }
+
+                for day in root.days: Rectangle {
+                    horizontal-stretch: 1;
+                    min-width: 40px;
+                    height: day.all-day.length > 0 ? 28px * day.all-day.length : 0px;
+                    VerticalLayout {
+                        spacing: 2px;
+                        for chip in day.all-day: Rectangle {
+                            height: 24px;
+                            border-radius: OxideShape.extra-small;
+                            background: OxideAccents.container(chip.accent);
+                            Text {
+                                x: OxideSpacing.xs;
+                                width: parent.width - 2 * OxideSpacing.xs;
+                                text: chip.title;
+                                font-size: OxideType.label-small.size;
+                                color: OxideAccents.on-container(chip.accent);
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                        }
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                Rectangle {
+                    width: root.gutter;
+                    height: root.hour-height * 24;
+
+                    for hour in 24: Text {
+                        x: 0px;
+                        y: hour * root.hour-height - 8px;
+                        width: root.gutter - OxideSpacing.xs;
+                        text: "\{hour}:00";
+                        font-size: OxideType.label-small.size;
+                        color: OxideTheme.colors.on-surface-variant;
+                        horizontal-alignment: right;
+                    }
+                }
+
+                for day[index] in root.days: Rectangle {
+                    horizontal-stretch: 1;
+                    min-width: 40px;
+                    height: root.hour-height * 24;
+                    border-width: 1px;
+                    border-color: OxideTheme.colors.outline-variant;
+                    background: day.today ? OxideTheme.colors.primary-container.with-alpha(0.12) : transparent;
+
+                    // Empty-slot clicks create an event at that hour. Declared first, blocks sit above it.
+                    slots := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            root.slot-clicked(day.key, floor(self.mouse-y / root.hour-height));
+                        }
+                    }
+
+                    for hour in 24: Rectangle {
+                        y: hour * root.hour-height;
+                        height: 1px;
+                        background: OxideTheme.colors.outline-variant.with-alpha(0.5);
+                    }
+
+                    for block in day.blocks: Rectangle {
+                        x: (parent.width - 4px) * block.column / block.columns + 2px;
+                        width: (parent.width - 4px) / block.columns - 2px;
+                        y: block.top * root.hour-height / 60;
+                        height: max(block.height * root.hour-height / 60 - 2px, 22px);
+                        border-radius: OxideShape.small;
+                        background: OxideAccents.container(block.accent);
+                        clip: true;
+
+                        TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                root.open-event(block.event-id, block.start-key);
+                            }
+                        }
+
+                        VerticalLayout {
+                            padding: OxideSpacing.xs;
+                            spacing: 0px;
+                            Text {
+                                text: block.title;
+                                font-size: OxideType.label-large.size;
+                                font-weight: 600;
+                                font-family: OxideType.family;
+                                color: OxideAccents.on-container(block.accent);
+                                overflow: elide;
+                            }
+                            Text {
+                                text: block.subtitle;
+                                font-size: OxideType.label-small.size;
+                                font-family: OxideType.family;
+                                color: OxideAccents.on-container(block.accent);
+                                overflow: elide;
+                            }
+                        }
+                    }
+
+                    if day.today && root.now-minutes >= 0: Rectangle {
+                        y: root.now-minutes * root.hour-height / 60;
+                        height: 2px;
+                        background: OxideTheme.colors.error;
+                    }
+                }
+            }
+        }
+    }
+}
+
+export component AgendaView inherits Rectangle {
+    in property <[AgendaData]> items;
+    in property <string> empty-message;
+    callback open-event(int, string);
+
+    background: transparent;
+
+    VerticalLayout {
+        if root.items.length == 0: Text {
+            text: root.empty-message;
+            font-size: OxideType.body-large.size;
+            color: OxideTheme.colors.on-surface-variant;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            vertical-stretch: 1;
+        }
+
+        ScrollView {
+            VerticalLayout {
+                spacing: OxideSpacing.xs;
+
+                for item in root.items: Rectangle {
+                    min-height: 64px;
+                    border-radius: OxideShape.medium;
+                    background: OxideTheme.colors.surface-container-low;
+
+                    touch := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            root.open-event(item.event-id, item.start-key);
+                        }
+                    }
+
+                    HorizontalLayout {
+                        padding: OxideSpacing.sm;
+                        spacing: OxideSpacing.md;
+
+                        Rectangle {
+                            width: 6px;
+                            border-radius: 3px;
+                            background: OxideAccents.container(item.accent);
+                        }
+
+                        VerticalLayout {
+                            alignment: center;
+                            spacing: OxideSpacing.xxs;
+                            horizontal-stretch: 1;
+
+                            Text {
+                                text: item.title;
+                                font-size: OxideType.title-medium.size;
+                                font-weight: OxideType.title-medium.weight;
+                                font-family: OxideType.family;
+                                color: OxideTheme.colors.on-surface;
+                                overflow: elide;
+                            }
+                            Text {
+                                text: item.location == "" ? item.when : item.when + " · " + item.location;
+                                font-size: OxideType.body-medium.size;
+                                font-family: OxideType.family;
+                                color: OxideTheme.colors.on-surface-variant;
+                                overflow: elide;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}

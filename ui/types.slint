@@ -1,0 +1,54 @@
+// Plain data passed from Rust. Field names map to snake_case in Rust.
+
+export struct MonthCellData {
+    key: string,
+    label: string,
+    in-month: bool,
+    today: bool,
+    items: [string],
+    accents: [int],
+    more: int,
+}
+
+export struct BlockData {
+    event-id: int,
+    start-key: string,
+    title: string,
+    subtitle: string,
+    top: float,
+    height: float,
+    column: int,
+    columns: int,
+    accent: int,
+}
+
+export struct AllDayData {
+    event-id: int,
+    start-key: string,
+    title: string,
+    accent: int,
+}
+
+export struct DayColumnData {
+    key: string,
+    label: string,
+    today: bool,
+    all-day: [AllDayData],
+    blocks: [BlockData],
+}
+
+export struct AgendaData {
+    event-id: int,
+    start-key: string,
+    title: string,
+    when: string,
+    location: string,
+    accent: int,
+}
+
+export struct CategoryData {
+    id: int,
+    name: string,
+    accent: int,
+    visible: bool,
+}

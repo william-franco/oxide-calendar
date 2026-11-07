@@ -1,0 +1,584 @@
+import { ScrollView, Palette } from "std-widgets.slint";
+import {
+    OxideTheme, OxideType, OxideSpacing, OxideShape, OxideBreakpoints, OxideIcons,
+    OxideButton, OxideButtonVariant, OxideIconButton, OxideIconButtonVariant,
+    OxideSegmented, OxideSearchField, OxideTextField, OxideSelect, OxideSwitch, OxideCheckbox,
+    OxideDatePicker, OxideDialog, OxideDialogAction, OxideSideSheet, OxideSnackbar, OxideDivider,
+} from "@oxide/oxide.slint";
+import { MonthCellData, DayColumnData, AgendaData, CategoryData } from "types.slint";
+import { SettingsPage } from "settings-page.slint";
+import { MonthView, TimeGrid, AgendaView } from "views.slint";
+
+export { MonthCellData, DayColumnData, AgendaData, CategoryData, AllDayData, BlockData } from "types.slint";
+export { OxideTheme } from "@oxide/oxide.slint";
+
+// Mini calendar and category filters, used both docked and inside the overlay sheet.
+component SidebarContent inherits VerticalLayout {
+    in property <int> mini-year;
+    in property <int> mini-month;
+    in property <int> mini-selected-year;
+    in property <int> mini-selected-month;
+    in property <int> mini-selected-day;
+    in property <int> mini-today-year;
+    in property <int> mini-today-month;
+    in property <int> mini-today-day;
+    in property <[CategoryData]> categories;
+    callback mini-navigate(int, int);
+    callback mini-select(int, int, int);
+    callback toggle-category(int, bool);
+
+    spacing: OxideSpacing.md;
+
+    OxideDatePicker {
+        year: root.mini-year;
+        month: root.mini-month;
+        selected-year: root.mini-selected-year;
+        selected-month: root.mini-selected-month;
+        selected-day: root.mini-selected-day;
+        today-year: root.mini-today-year;
+        today-month: root.mini-today-month;
+        today-day: root.mini-today-day;
+        month-changed(y, m) => {
+            root.mini-navigate(y, m);
+        }
+        selected(y, m, d) => {
+            root.mini-select(y, m, d);
+        }
+    }
+
+    Text {
+        text: "Categorias";
+        font-size: OxideType.title-small.size;
+        font-weight: OxideType.title-small.weight;
+        color: OxideTheme.colors.on-surface;
+    }
+
+    for category in root.categories: OxideCheckbox {
+        text: category.name;
+        checked: category.visible;
+        toggled(v) => {
+            root.toggle-category(category.id, v);
+        }
+    }
+}
+
+export component AppWindow inherits Window {
+    title: "Oxide-calendar";
+    min-width: 360px;
+    min-height: 640px;
+    preferred-width: 1100px;
+    preferred-height: 760px;
+    background: OxideTheme.colors.surface;
+
+    // ---- Data from Rust --------------------------------------------------------------------
+    in property <string> view-title;
+    in-out property <int> view-index: 0;
+    in property <[MonthCellData]> month-cells;
+    in property <[DayColumnData]> day-columns;
+    in property <[AgendaData]> agenda-items;
+    in property <string> agenda-empty;
+    in property <[CategoryData]> categories;
+    in property <[string]> category-names;
+    in property <float> now-minutes: -1;
+    in property <int> mini-year: 2026;
+    in property <int> mini-month: 1;
+    in property <int> mini-selected-year: 2026;
+    in property <int> mini-selected-month: 1;
+    in property <int> mini-selected-day: 1;
+    in property <int> mini-today-year: 2026;
+    in property <int> mini-today-month: 1;
+    in property <int> mini-today-day: 1;
+    in-out property <string> message;
+    in-out property <bool> message-shown;
+
+    // ---- Editor fields (set by Rust before opening, read by Rust on save) ------------------
+    in-out property <bool> editor-shown;
+    in-out property <bool> editing;
+    in-out property <bool> recurring;
+    in-out property <string> f-title;
+    in-out property <string> f-description;
+    in-out property <string> f-location;
+    in-out property <int> f-category;
+    in-out property <bool> f-all-day;
+    in-out property <string> f-start-date;
+    in-out property <string> f-start-time;
+    in-out property <string> f-end-date;
+    in-out property <string> f-end-time;
+    in-out property <int> f-recurrence;
+    in-out property <int> f-reminder;
+    in-out property <bool> f-apply-series: true;
+    in property <string> f-error;
+
+    // ---- Settings ----------------------------------------------------------------------------
+    in property <string> app-version;
+    // True when the user already chose a theme; otherwise the system scheme is used.
+    in property <bool> theme-saved;
+    in-out property <bool> settings-open;
+    callback dark-changed(bool);
+
+    // ---- Callbacks to Rust -----------------------------------------------------------------
+    callback navigate(int);
+    callback go-today();
+    callback view-changed(int);
+    callback search(string);
+    callback toggle-category(int, bool);
+    callback open-day(string);
+    callback slot-clicked(string, int);
+    callback open-event(int, string);
+    callback new-event();
+    callback save();
+    callback delete-event();
+    callback duplicate-event();
+    callback close-editor();
+    callback import-ics();
+    callback export-ics();
+    callback layout-changed(int);
+    callback mini-navigate(int, int);
+    callback mini-select(int, int, int);
+
+    // ---- Local UI state --------------------------------------------------------------------
+    property <bool> expanded;
+    property <bool> medium;
+    in-out property <bool> sidebar-open;
+    property <bool> show-search;
+
+    changed width => {
+        root.expanded = root.width >= OxideBreakpoints.expanded;
+        root.medium = root.width >= OxideBreakpoints.medium;
+        root.show-search = root.width >= 600px;
+        root.layout-changed(root.expanded ? 7 : root.medium ? 5 : 3);
+    }
+
+    init => {
+        root.expanded = root.width >= OxideBreakpoints.expanded;
+        root.medium = root.width >= OxideBreakpoints.medium;
+        root.show-search = root.width >= 600px;
+        root.layout-changed(root.expanded ? 7 : root.medium ? 5 : 3);
+        OxideTheme.dark = root.theme-saved ? OxideTheme.dark : Palette.color-scheme == ColorScheme.dark;
+        keys.focus();
+    }
+
+    changed query => {
+        root.search(root.query);
+    }
+
+    in-out property <string> query;
+
+    keys := FocusScope {
+        key-pressed(event) => {
+            if (event.modifiers.alt || event.modifiers.meta) {
+                return reject;
+            }
+            if (root.editor-shown) {
+                if (event.text == Key.Escape) {
+                    root.close-editor();
+                    return accept;
+                }
+                return reject;
+            }
+            if (event.text == Key.Escape && root.settings-open) {
+                root.settings-open = false;
+                return accept;
+            }
+            if (event.text == Key.Escape && root.sidebar-open) {
+                root.sidebar-open = false;
+                return accept;
+            }
+            if (event.modifiers.control && (event.text == "n" || event.text == "N")) {
+                root.new-event();
+                return accept;
+            }
+            if (event.modifiers.control) {
+                return reject;
+            }
+            if (event.text == Key.LeftArrow || event.text == Key.PageUp) {
+                root.navigate(-1);
+                return accept;
+            }
+            if (event.text == Key.RightArrow || event.text == Key.PageDown) {
+                root.navigate(1);
+                return accept;
+            }
+            if (event.text == "t" || event.text == "T") {
+                root.go-today();
+                return accept;
+            }
+            if (event.text == "m" || event.text == "M") {
+                root.view-changed(0);
+                return accept;
+            }
+            if (event.text == "w" || event.text == "W") {
+                root.view-changed(1);
+                return accept;
+            }
+            if (event.text == "d" || event.text == "D") {
+                root.view-changed(2);
+                return accept;
+            }
+            if (event.text == "a" || event.text == "A") {
+                root.view-changed(3);
+                return accept;
+            }
+            reject
+        }
+
+        VerticalLayout {
+            padding: root.medium ? OxideSpacing.xl : OxideSpacing.md;
+            spacing: OxideSpacing.sm;
+
+            // ---- Toolbar -------------------------------------------------------------------
+            HorizontalLayout {
+                spacing: OxideSpacing.xs;
+
+                if !root.expanded: OxideIconButton {
+                    icon: OxideIcons.menu;
+                    description: "Mostrar categorias e calendário";
+                    selected: root.sidebar-open;
+                    clicked => {
+                        root.sidebar-open = !root.sidebar-open;
+                    }
+                }
+
+                OxideIconButton {
+                    icon: OxideIcons.chevron-left;
+                    description: "Anterior";
+                    clicked => {
+                        root.navigate(-1);
+                    }
+                }
+
+                OxideIconButton {
+                    icon: OxideIcons.chevron-right;
+                    description: "Próximo";
+                    clicked => {
+                        root.navigate(1);
+                    }
+                }
+
+                OxideButton {
+                    text: "Hoje";
+                    variant: OxideButtonVariant.tonal;
+                    clicked => {
+                        root.go-today();
+                    }
+                }
+
+                Text {
+                    text: root.view-title;
+                    font-size: OxideType.title-large.size;
+                    font-weight: OxideType.title-large.weight;
+                    font-family: OxideType.family;
+                    color: OxideTheme.colors.on-surface;
+                    vertical-alignment: center;
+                    overflow: elide;
+                    horizontal-stretch: 1;
+                    min-width: 0px;
+                }
+
+                if root.show-search: OxideSearchField {
+                    width: 200px;
+                    text <=> root.query;
+                    placeholder: "Pesquisar";
+                }
+
+                OxideIconButton {
+                    icon: OxideIcons.upload;
+                    description: "Importar arquivo .ics";
+                    clicked => {
+                        root.import-ics();
+                    }
+                }
+
+                OxideIconButton {
+                    icon: OxideIcons.download;
+                    description: "Exportar arquivo .ics";
+                    clicked => {
+                        root.export-ics();
+                    }
+                }
+
+                OxideIconButton {
+                    icon: OxideIcons.settings;
+                    description: "Configurações";
+                    selected: root.settings-open;
+                    clicked => {
+                        root.settings-open = !root.settings-open;
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: OxideSpacing.sm;
+                alignment: space-between;
+
+                OxideSegmented {
+                    options: ["Mês", "Semana", "Dia", "Agenda"];
+                    selected: root.view-index;
+                    description: "Visualização";
+                    width: 340px;
+                    selection-changed(index) => {
+                        root.view-changed(index);
+                    }
+                }
+
+                OxideButton {
+                    text: "Novo evento";
+                    icon: OxideIcons.add;
+                    variant: OxideButtonVariant.filled;
+                    clicked => {
+                        root.new-event();
+                    }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: OxideSpacing.lg;
+                vertical-stretch: 1;
+
+                // Docked sidebar on wide windows.
+                if root.expanded: VerticalLayout {
+                    width: 260px;
+                    spacing: OxideSpacing.md;
+                    sidebar-content := SidebarContent {
+                        mini-year: root.mini-year;
+                        mini-month: root.mini-month;
+                        mini-selected-year: root.mini-selected-year;
+                        mini-selected-month: root.mini-selected-month;
+                        mini-selected-day: root.mini-selected-day;
+                        mini-today-year: root.mini-today-year;
+                        mini-today-month: root.mini-today-month;
+                        mini-today-day: root.mini-today-day;
+                        categories: root.categories;
+                        mini-navigate(y, m) => { root.mini-navigate(y, m); }
+                        mini-select(y, m, d) => { root.mini-select(y, m, d); }
+                        toggle-category(id, v) => { root.toggle-category(id, v); }
+                    }
+                }
+
+                VerticalLayout {
+                    horizontal-stretch: 1;
+                    spacing: OxideSpacing.xs;
+
+                    if root.view-index == 0: MonthView {
+                        vertical-stretch: 1;
+                        cells: root.month-cells;
+                        open-day(key) => {
+                            root.open-day(key);
+                        }
+                    }
+
+                    if root.view-index == 1 || root.view-index == 2: TimeGrid {
+                        vertical-stretch: 1;
+                        days: root.day-columns;
+                        now-minutes: root.now-minutes;
+                        open-event(id, key) => {
+                            root.open-event(id, key);
+                        }
+                        slot-clicked(key, hour) => {
+                            root.slot-clicked(key, hour);
+                        }
+                    }
+
+                    if root.view-index == 3: AgendaView {
+                        vertical-stretch: 1;
+                        items: root.agenda-items;
+                        empty-message: root.agenda-empty;
+                        open-event(id, key) => {
+                            root.open-event(id, key);
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    // Overlay sidebar on narrow windows.
+    if !root.expanded: OxideSideSheet {
+        width: 100%;
+        height: 100%;
+        modal: true;
+        shown: root.sidebar-open;
+        sheet-width: 300px;
+        dismissed => {
+            root.sidebar-open = false;
+        }
+
+        VerticalLayout {
+            padding: OxideSpacing.lg;
+            spacing: OxideSpacing.md;
+
+            SidebarContent {
+                mini-year: root.mini-year;
+                mini-month: root.mini-month;
+                mini-selected-year: root.mini-selected-year;
+                mini-selected-month: root.mini-selected-month;
+                mini-selected-day: root.mini-selected-day;
+                mini-today-year: root.mini-today-year;
+                mini-today-month: root.mini-today-month;
+                mini-today-day: root.mini-today-day;
+                categories: root.categories;
+                mini-navigate(y, m) => { root.mini-navigate(y, m); }
+                mini-select(y, m, d) => {
+                    root.sidebar-open = false;
+                    root.mini-select(y, m, d);
+                }
+                toggle-category(id, v) => { root.toggle-category(id, v); }
+            }
+        }
+    }
+
+    // ---- Event editor --------------------------------------------------------------------
+    // Settings replaces the whole content area while open.
+    if root.settings-open: SettingsPage {
+        width: 100%;
+        height: 100%;
+        app-version: root.app-version;
+        dark-changed(v) => {
+            root.dark-changed(v);
+        }
+        back => {
+            root.settings-open = false;
+        }
+    }
+
+    OxideDialog {
+        width: 100%;
+        height: 100%;
+        shown: root.editor-shown;
+        headline: root.editing ? "Editar evento" : "Novo evento";
+        fullscreen: !root.expanded;
+        dismissed => {
+            root.close-editor();
+        }
+
+        ScrollView {
+            VerticalLayout {
+                spacing: OxideSpacing.md;
+
+                OxideTextField {
+                    label: "Título";
+                    placeholder: "Ex.: Reunião de planejamento";
+                    text <=> root.f-title;
+                }
+
+                OxideTextField {
+                    label: "Local";
+                    placeholder: "Opcional";
+                    text <=> root.f-location;
+                }
+
+                OxideSelect {
+                    label: "Categoria";
+                    options: root.category-names;
+                    selected <=> root.f-category;
+                }
+
+                OxideSwitch {
+                    text: "Dia inteiro";
+                    checked <=> root.f-all-day;
+                }
+
+                HorizontalLayout {
+                    spacing: OxideSpacing.sm;
+                    OxideTextField {
+                        label: "Início (AAAA-MM-DD)";
+                        text <=> root.f-start-date;
+                        horizontal-stretch: 3;
+                    }
+                    if !root.f-all-day: OxideTextField {
+                        label: "Hora";
+                        text <=> root.f-start-time;
+                        horizontal-stretch: 2;
+                    }
+                }
+
+                HorizontalLayout {
+                    spacing: OxideSpacing.sm;
+                    OxideTextField {
+                        label: "Fim (AAAA-MM-DD)";
+                        text <=> root.f-end-date;
+                        horizontal-stretch: 3;
+                    }
+                    if !root.f-all-day: OxideTextField {
+                        label: "Hora";
+                        text <=> root.f-end-time;
+                        horizontal-stretch: 2;
+                    }
+                }
+
+                OxideSelect {
+                    label: "Repetição";
+                    options: ["Não repete", "Diariamente", "Semanalmente", "Mensalmente", "Anualmente", "Personalizada (manter)"];
+                    selected <=> root.f-recurrence;
+                }
+
+                OxideSelect {
+                    label: "Lembrete";
+                    options: ["Nenhum", "Na hora", "5 minutos antes", "15 minutos antes", "30 minutos antes", "1 hora antes", "1 dia antes", "Manter atual"];
+                    selected <=> root.f-reminder;
+                }
+
+                OxideTextField {
+                    label: "Descrição";
+                    multiline: true;
+                    text <=> root.f-description;
+                }
+
+                if root.recurring: OxideSwitch {
+                    text: "Aplicar a toda a série (desligado: só esta ocorrência)";
+                    checked <=> root.f-apply-series;
+                }
+
+                if root.f-error != "": Text {
+                    text: root.f-error;
+                    color: OxideTheme.colors.error;
+                    font-size: OxideType.body-medium.size;
+                    wrap: word-wrap;
+                }
+
+                OxideDivider { }
+
+                HorizontalLayout {
+                    spacing: OxideSpacing.xs;
+
+                    if root.editing: OxideDialogAction {
+                        text: "Excluir";
+                        clicked => {
+                            root.delete-event();
+                        }
+                    }
+                    if root.editing: OxideDialogAction {
+                        text: "Duplicar";
+                        clicked => {
+                            root.duplicate-event();
+                        }
+                    }
+
+                    Rectangle { }
+
+                    OxideDialogAction {
+                        text: "Cancelar";
+                        clicked => {
+                            root.close-editor();
+                        }
+                    }
+                    OxideDialogAction {
+                        text: "Salvar";
+                        primary: true;
+                        clicked => {
+                            root.save();
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    OxideSnackbar {
+        width: 100%;
+        height: 100%;
+        shown: root.message-shown;
+        message: root.message;
+        action-text: "";
+    }
+}

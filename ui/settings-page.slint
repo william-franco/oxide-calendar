@@ -1,0 +1,65 @@
+import { OxideTheme, OxideSpacing, OxideIcons, OxideTopAppBar, OxideSwitchItem, OxideActionItem, OxideAboutDialog } from "@oxide/oxide.slint";
+
+// Full-window settings page: dark theme switch and the About dialog.
+export component SettingsPage inherits Rectangle {
+    in property <string> app-version;
+    callback back();
+    callback dark-changed(bool);
+
+    property <bool> about-shown;
+
+    background: OxideTheme.colors.surface;
+
+    VerticalLayout {
+        padding-left: OxideSpacing.md;
+        padding-right: OxideSpacing.md;
+        padding-top: OxideSpacing.md;
+        spacing: OxideSpacing.xs;
+
+        OxideTopAppBar {
+            title: "Configurações";
+            back => {
+                root.back();
+            }
+        }
+
+        OxideSwitchItem {
+            icon: OxideIcons.dark-mode;
+            headline: "Tema escuro";
+            supporting: "Usa as cores escuras do Material 3";
+            checked: OxideTheme.dark;
+            toggled(v) => {
+                OxideTheme.dark = v;
+                root.dark-changed(v);
+            }
+        }
+
+        OxideActionItem {
+            icon: OxideIcons.info;
+            headline: "Sobre";
+            supporting: "Versão, licença e autor";
+            clicked => {
+                root.about-shown = true;
+            }
+        }
+
+        Rectangle {
+            vertical-stretch: 1;
+        }
+    }
+
+    OxideAboutDialog {
+        width: 100%;
+        height: 100%;
+        shown: root.about-shown;
+        app-name: "Oxide-calendar";
+        version: root.app-version;
+        description: "Calendário local-first para Linux, com recorrência, lembretes e arquivos .ics.";
+        license: "MIT";
+        copyright: "© 2026 William Franco";
+        url: "github.com/william-franco/oxide-calendar";
+        dismissed => {
+            root.about-shown = false;
+        }
+    }
+}

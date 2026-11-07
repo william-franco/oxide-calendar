@@ -2,5 +2,23 @@
 name = "oxide-calendar"
 version = "0.1.0"
 edition = "2024"
+description = "Oxide-calendar: local-first Material 3 calendar for Linux, built with Slint and the Oxide design system."
+license = "MIT"
+repository = "https://github.com/william-franco/oxide-calendar"
 
 [dependencies]
+slint = "1.18"
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
+rusqlite_migration = "2.6"
+notify-rust = "4"
+rfd = { version = "0.15", default-features = false, features = ["xdg-portal", "async-std"] }
+
+[build-dependencies]
+slint-build = "1.18"
+oxide-ui = { git = "https://github.com/william-franco/oxide-ui", branch = "main" }
+
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true
